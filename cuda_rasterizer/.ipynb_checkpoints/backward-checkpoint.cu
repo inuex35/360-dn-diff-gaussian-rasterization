@@ -145,8 +145,8 @@ __global__ void computeCov2DCUDA(int P,
   const float3* means,
   const int* radii,
   const float* cov3Ds,
-  const float h_x, const float h_y,
-  const float tan_fovx, const float tan_fovy,
+  const float h_x, float h_y,
+  const float tan_fovx, float tan_fovy,
   const float* view_matrix,
   const float* dL_dconics,
   float3* dL_dmeans,
@@ -281,8 +281,7 @@ __global__ void computesphericalCov2DCUDA(int P,
 	const float3* means,
 	const int* radii,
 	const float* cov3Ds,
-	const float h_x, const float h_y,
-    const float tan_fovx, const float tan_fovy,
+	const float h_x, float h_y,
 	const float* view_matrix,
 	const float* dL_dconics,
 	float3* dL_dmeans,
@@ -604,29 +603,25 @@ __global__ void preprocessCUDA(
 // for the covariance computation and inversion
 // (those are handled by a previous kernel call)
 template<int C>
-__global__ void preprocesssphericalCUDA(
-  int P, int D, int M,
-  const float3* means,
-  const int* radii,
-  const float* shs,
-  const glm::vec3* norm3Ds,
-  bool is_norm3Ds_precomp,
-  const bool* clamped,
-  const glm::vec3* scales,
-  const glm::vec4* rotations,
-  const float scale_modifier,
-  const float* view,
-  const float* proj,
-  const glm::vec3* campos,
-  const float3* dL_dmean2D,
-  glm::vec3* dL_dmeans,
-  float* dL_dcolor,
-  float* dL_ddepth,
-  float* dL_dcov3D,
-  glm::vec3* dL_dnorm3D,
-  float* dL_dsh,
-  glm::vec3* dL_dscale,
-  glm::vec4* dL_drot)
+__global__ void preprocessspehricalCUDA(
+	int P, int D, int M,
+	const float3* means,
+	const int* radii,
+	const float* shs,
+	const bool* clamped,
+	const glm::vec3* scales,
+	const glm::vec4* rotations,
+	const float scale_modifier,
+	const float* view_matrix,
+	const float* proj,
+	const glm::vec3* campos,
+	const float3* dL_dmean2D,
+	glm::vec3* dL_dmeans,
+	float* dL_dcolor,
+	float* dL_dcov3D,
+	float* dL_dsh,
+	glm::vec3* dL_dscale,
+	glm::vec4* dL_drot)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
@@ -654,11 +649,12 @@ __global__ void preprocesssphericalCUDA(
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
+
 	// Compute gradient updates due to computing covariance from scale/rotation
 	if (scales)
 		computeCov3D(idx, scales[idx], scale_modifier, rotations[idx], dL_dcov3D, dL_dscale, dL_drot);
-    if (!is_norm3Ds_precomp)
-        computeNorm3D(idx, scales[idx], rotations[idx], norm3Ds[idx], dL_dnorm3D[idx], dL_dscale, dL_drot);
+  if (!is_norm3Ds_precomp)
+    computeNorm3D(idx, scales[idx], rotations[idx], norm3Ds[idx], dL_dnorm3D[idx], dL_dscale, dL_drot);
 }
 
 
@@ -954,81 +950,6 @@ void BACKWARD::preprocess(
   // propagate color gradients to SH (if desireD), propagate 3D covariance
   // matrix gradients to scale and rotation.
   preprocessCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
-    P, D, M,
-    (float3*)means3D,
-    radii,
-    shs,
-    (glm::vec3*)norm3Ds,
-    is_norm3Ds_precomp,
-    clamped,
-    (glm::vec3*)scales,
-    (glm::vec4*)rotations,
-    scale_modifier,
-    viewmatrix,
-    projmatrix,
-    campos,
-    (float3*)dL_dmean2D,
-    (glm::vec3*)dL_dmean3D,
-    dL_dcolor,
-    dL_ddepth,
-    dL_dcov3D,
-    (glm::vec3*)dL_dnorm3D,
-    dL_dsh,
-    dL_dscale,
-    dL_drot);
-}
-
-
-void BACKWARD::preprocessspherical(
-  int P, int D, int M,
-  const float3* means3D,
-  const int* radii,
-  const float* shs,
-  const bool* clamped,
-  const glm::vec3* scales,
-  const glm::vec4* rotations,
-  const float scale_modifier,
-  const float* cov3Ds,
-  const glm::vec3* norm3Ds,
-  bool is_norm3Ds_precomp,
-  const float* viewmatrix,
-  const float* projmatrix,
-  const float focal_x, const float focal_y,
-  const float tan_fovx, const float tan_fovy,
-  const glm::vec3* campos,
-  const float3* dL_dmean2D,
-  const float* dL_dconic,
-  glm::vec3* dL_dmean3D,
-  float* dL_dcolor,
-  float* dL_ddepth,
-  float* dL_dcov3D,
-  glm::vec3* dL_dnorm3D,
-  float* dL_dsh,
-  glm::vec3* dL_dscale,
-  glm::vec4* dL_drot)
-{
-  // Propagate gradients for the path of 2D conic matrix computation. 
-  // Somewhat long, thus it is its own kernel rather than being part of 
-  // "preprocess". When done, loss gradient w.r.t. 3D means has been
-  // modified and gradient w.r.t. 3D covariance matrix has been computed.  
-  computesphericalCov2DCUDA << <(P + 255) / 256, 256 >> > (
-    P,
-    means3D,
-    radii,
-    cov3Ds,
-    focal_x,
-    focal_y,
-    tan_fovx,
-    tan_fovy,
-    viewmatrix,
-    dL_dconic,
-    (float3*)dL_dmean3D,
-    dL_dcov3D);
-
-  // Propagate gradients for remaining steps: finish 3D mean gradients,
-  // propagate color gradients to SH (if desireD), propagate 3D covariance
-  // matrix gradients to scale and rotation.
-  preprocesssphericalCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
     P, D, M,
     (float3*)means3D,
     radii,
