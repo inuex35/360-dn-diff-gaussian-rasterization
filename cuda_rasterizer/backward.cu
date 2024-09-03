@@ -286,26 +286,29 @@ __global__ void computesphericalCov2DCUDA(int P,
 	float3* dL_dmeans,
 	float* dL_dcov)
 {
-    float W = h_x * 8;
-    float H = h_y * 8;
-    auto idx = cg::this_grid().thread_rank();
+	auto idx = cg::this_grid().thread_rank();
+    float w = h_x * 8;
+    float h = h_y * 8;
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
+	// Reading location of 3D covariance for this Gaussian
 	const float* cov3D = cov3Ds + 6 * idx;
 
+	// Fetch gradients, recompute 2D covariance and relevant
+	// intermediate forward results needed in the backward.
 	float3 mean = means[idx];
 	float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };
     float3 t = transformPoint4x3(mean, view_matrix);
-
+    
     float tr = sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
 
     glm::mat3 J = glm::mat3(
-        W / (2 * M_PI)  * t.z / (t.x * t.x + t.z * t.z), 0.0f, -W / (2 * M_PI)  * t.x / (t.x * t.x + t.z * t.z),
-        -H / M_PI * (t.x * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)), H / M_PI * sqrt(t.x * t.x + t.z * t.z) / (tr * tr), -H / M_PI * (t.z * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)),
+        w / (2 * M_PI)  * t.z / (t.x * t.x + t.z * t.z), 0.0f, -w / (2 * M_PI)  * t.x / (t.x * t.x + t.z * t.z),
+        -h / M_PI * (t.x * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)), h / M_PI * sqrt(t.x * t.x + t.z * t.z) / (tr * tr), -h / M_PI * (t.z * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)),
         0.0f, 0.0f, 0.0f);
-
-	glm::mat3 W_mat = glm::mat3(
+        
+	glm::mat3 W = glm::mat3(
 		view_matrix[0], view_matrix[4], view_matrix[8],
 		view_matrix[1], view_matrix[5], view_matrix[9],
 		view_matrix[2], view_matrix[6], view_matrix[10]);
@@ -315,10 +318,11 @@ __global__ void computesphericalCov2DCUDA(int P,
 		cov3D[1], cov3D[3], cov3D[4],
 		cov3D[2], cov3D[4], cov3D[5]);
 
-	glm::mat3 T = W_mat * J;
+	glm::mat3 T = W * J;
 
 	glm::mat3 cov2D = glm::transpose(T) * glm::transpose(Vrk) * T;
 
+	// Use helper variables for 2D covariance entries. More compact.
 	float a = cov2D[0][0] += 0.3f;
 	float b = cov2D[0][1];
 	float c = cov2D[1][1] += 0.3f;
@@ -360,10 +364,10 @@ __global__ void computesphericalCov2DCUDA(int P,
 	float dL_dT12 = 2 * (T[1][0] * Vrk[2][0] + T[1][1] * Vrk[2][1] + T[1][2] * Vrk[2][2]) * dL_dc +
 		(T[0][0] * Vrk[2][0] + T[0][1] * Vrk[2][1] + T[0][2] * Vrk[2][2]) * dL_db;
 
-	float dL_dJ00 = W_mat[0][0] * dL_dT00 + W_mat[0][1] * dL_dT01 + W_mat[0][2] * dL_dT02;
-	float dL_dJ02 = W_mat[2][0] * dL_dT00 + W_mat[2][1] * dL_dT01 + W_mat[2][2] * dL_dT02;
-	float dL_dJ11 = W_mat[1][0] * dL_dT10 + W_mat[1][1] * dL_dT11 + W_mat[1][2] * dL_dT12;
-	float dL_dJ12 = W_mat[2][0] * dL_dT10 + W_mat[2][1] * dL_dT11 + W_mat[2][2] * dL_dT12;
+	float dL_dJ00 = W[0][0] * dL_dT00 + W[0][1] * dL_dT01 + W[0][2] * dL_dT02;
+	float dL_dJ02 = W[2][0] * dL_dT00 + W[2][1] * dL_dT01 + W[2][2] * dL_dT02;
+	float dL_dJ11 = W[1][0] * dL_dT10 + W[1][1] * dL_dT11 + W[1][2] * dL_dT12;
+	float dL_dJ12 = W[2][0] * dL_dT10 + W[2][1] * dL_dT11 + W[2][2] * dL_dT12;
 
 	float tz = 1.f / t.z;
 	float tz2 = tz * tz;

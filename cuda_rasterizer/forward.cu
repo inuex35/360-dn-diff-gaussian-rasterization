@@ -113,7 +113,7 @@ __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y,
 }
 
 // Forward version of 2D covariance matrix computation
-__device__ float3 computesphericalCov2D(const float3& mean, float W, float H, float tan_fovx, float tan_fovy, const float* cov3D, const float* viewmatrix)
+__device__ float3 computesphericalCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, const float* cov3D, const float* viewmatrix)
 {
     // The following models the steps outlined by equations 29
     // and 31 in "EWA Splatting" (Zwicker et al., 2002). 
@@ -121,20 +121,23 @@ __device__ float3 computesphericalCov2D(const float3& mean, float W, float H, fl
     // Transposes used to account for row-/column-major conventions.
     
     float3 t = transformPoint4x3(mean, viewmatrix);
+    
+    float w = focal_x * 8;
+    float h = focal_y * 8;
 
     float tr = sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
 
     glm::mat3 J = glm::mat3(
-        W / (2 * M_PI)  * t.z / (t.x * t.x + t.z * t.z), 0.0f, -W / (2 * M_PI)  * t.x / (t.x * t.x + t.z * t.z),
-        -H / M_PI * (t.x * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)), H / M_PI * sqrt(t.x * t.x + t.z * t.z) / (tr * tr), -H / M_PI * (t.z * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)),
+        w / (2 * M_PI)  * t.z / (t.x * t.x + t.z * t.z), 0.0f, -w / (2 * M_PI)  * t.x / (t.x * t.x + t.z * t.z),
+        -h / M_PI * (t.x * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)), h / M_PI * sqrt(t.x * t.x + t.z * t.z) / (tr * tr), -h / M_PI * (t.z * t.y) / (tr * tr * sqrt(t.x * t.x + t.z * t.z)),
         0.0f, 0.0f, 0.0f);
 
-    glm::mat3 W_mat = glm::mat3(
+    glm::mat3 W = glm::mat3(
         viewmatrix[0], viewmatrix[4], viewmatrix[8],
         viewmatrix[1], viewmatrix[5], viewmatrix[9],
         viewmatrix[2], viewmatrix[6], viewmatrix[10]);
 
-    glm::mat3 T = W_mat * J;
+    glm::mat3 T = W * J;
 
     glm::mat3 Vrk = glm::mat3(
         cov3D[0], cov3D[1], cov3D[2],
